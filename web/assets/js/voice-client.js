@@ -36,6 +36,7 @@ export class RealtimeVoiceClient {
     this.speechThreshold = 0.02;
     this.silenceHoldMs = 1200;
     this.waitingForResponse = false;
+    this.currentAssistantTranscript = '';
     this.callbacks = {
       status: () => {},
       transcript: () => {},
@@ -93,13 +94,25 @@ export class RealtimeVoiceClient {
     await this._connectSocket();
   }
 
-  stop() {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.lastSpeechAt) {
+  startPushToTalk() {
+    // Enable audio sending
+    this.isPushToTalkActive = true;
+    this.callbacks.status('Recording...');
+  }
+
+  endPushToTalk() {
+    // Commit audio and request response
+    this.isPushToTalkActive = false;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this._send({ type: 'input_audio_buffer.commit' });
       if (!this.waitingForResponse) {
         this._createResponse();
       }
     }
+    this.callbacks.status('Processing...');
+  }
+
+  stop() {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -122,6 +135,8 @@ export class RealtimeVoiceClient {
     this.lastSpeechAt = 0;
     this.waitingForResponse = false;
     this.connected = false;
+    this.isPushToTalkActive = false;
+    this.currentAssistantTranscript = '';
     this.callbacks.status('Voice session ended.');
   }
 
@@ -138,6 +153,11 @@ export class RealtimeVoiceClient {
           session: {
             instructions: this.instructions,
             voice: this.voice,
+            modalities: ['text', 'audio'],
+            input_audio_transcription: {
+              model: 'whisper-1'
+            },
+            turn_detection: null
           },
         });
         this._createResponse('Introduce yourself and invite the dreamer to share.');
@@ -162,30 +182,51 @@ export class RealtimeVoiceClient {
   }
 
   _handleMessage(message) {
+    console.log('Received message type:', message.type);
     switch (message.type) {
+      case 'session.created':
+      case 'session.updated':
+        console.log('Session established:', message);
+        this.callbacks.status('Connected and ready');
+        break;
       case 'response.audio.delta':
         if (message.delta) {
+          console.log('Received audio delta');
           this._playAudio(message.delta);
         }
         break;
       case 'response.audio_transcript.delta':
         if (message.delta) {
-          this.callbacks.transcript({ speaker: 'assistant', text: message.delta });
+          this.currentAssistantTranscript += message.delta;
+        }
+        break;
+      case 'response.audio_transcript.done':
+        if (this.currentAssistantTranscript.trim()) {
+          console.log('Assistant said:', this.currentAssistantTranscript);
+          this.callbacks.transcript({
+            speaker: 'assistant',
+            text: this.currentAssistantTranscript.trim()
+          });
+          this.currentAssistantTranscript = '';
         }
         break;
       case 'input_audio_transcription.completed':
         if (message.transcript) {
+          console.log('User said:', message.transcript);
           this.callbacks.transcript({ speaker: 'user', text: message.transcript });
         }
         break;
       case 'response.created':
+        console.log('Response being generated...');
         this.waitingForResponse = true;
         break;
       case 'response.completed':
       case 'response.done':
+        console.log('Response completed');
         this.waitingForResponse = false;
         break;
       case 'error':
+        console.error('Realtime API error:', message.error);
         this.callbacks.error(new Error(message.error?.message || 'Realtime error'));
         break;
       default:
@@ -197,33 +238,19 @@ export class RealtimeVoiceClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
+
+    // Only send audio when push-to-talk is active
+    if (!this.isPushToTalkActive) {
+      return;
+    }
+
     const input = event.inputBuffer.getChannelData(0);
     const pcm = new Int16Array(input.length);
-    let maxAmplitude = 0;
     for (let i = 0; i < input.length; i += 1) {
       const v = Math.max(-1, Math.min(1, input[i]));
-      if (Math.abs(v) > maxAmplitude) {
-        maxAmplitude = Math.abs(v);
-      }
       pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
     }
     this._send({ type: 'input_audio_buffer.append', audio: toBase64Bytes(pcm) });
-    const now = Date.now();
-    if (maxAmplitude > this.speechThreshold) {
-      this.lastSpeechAt = now;
-    }
-    if (!this.lastCommitAt) {
-      this.lastCommitAt = now;
-    }
-    const enoughSilence = this.lastSpeechAt && now - this.lastSpeechAt >= this.silenceHoldMs;
-    if (enoughSilence && now - this.lastCommitAt >= this.commitIntervalMs) {
-      this._send({ type: 'input_audio_buffer.commit' });
-      if (!this.waitingForResponse) {
-        this._createResponse();
-      }
-      this.lastCommitAt = now;
-      this.lastSpeechAt = 0;
-    }
   }
 
   _playAudio(base64) {

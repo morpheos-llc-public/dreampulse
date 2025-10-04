@@ -50,8 +50,14 @@
       </div>
       <div class="voice-buttons">
         <button id="voice-start" class="primary">Start Voice Session</button>
-        <button id="voice-stop" class="danger" disabled>Stop</button>
+        <button id="voice-stop" class="danger" disabled>End Session</button>
         <button id="voice-submit-dream" class="primary" disabled>Submit Dream</button>
+      </div>
+      <div class="voice-controls" style="margin-top: 1rem;">
+        <button id="push-to-talk" class="primary" disabled style="width: 100%; padding: 1rem;">
+          🎤 Hold to Speak
+        </button>
+        <p style="font-size: 0.875rem; color: #666; margin-top: 0.5rem;">Press and hold while speaking, release when done</p>
       </div>
       <div id="voice-status" class="status-line" role="status">Microphone idle.</div>
       <div id="voice-transcript" class="voice-transcript" aria-live="polite"></div>

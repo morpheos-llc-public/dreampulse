@@ -13,6 +13,7 @@ const voiceStop = document.getElementById('voice-stop');
 const voiceStatus = document.getElementById('voice-status');
 const voiceTranscript = document.getElementById('voice-transcript');
 const voiceSubmitDream = document.getElementById('voice-submit-dream');
+const pushToTalkBtn = document.getElementById('push-to-talk');
 
 const resultsPanel = document.getElementById('results-panel');
 const resultsLoading = document.getElementById('results-loading');
@@ -85,7 +86,18 @@ function resetChat() {
   chatStatus.textContent = 'Conversation reset.';
 }
 
-const voiceInstructions = `You are DreamPulse Voice, a gentle guide who records dreams for later visualization. Keep replies concise, invite descriptive imagery, and acknowledge emotions. When the dreamer pauses, ask about other senses or feelings.`;
+const voiceInstructions = `You are DreamPulse Voice, a gentle English-speaking dream interviewer.
+
+CRITICAL: You MUST respond ONLY in English. Never use Spanish or any other language.
+
+Your role: Help the dreamer recall sensory details, characters, emotions, and settings from their recent dream. Respond in a warm tone and ask focused follow-up questions until you have enough to build a vivid scene.
+
+Keep your responses concise and conversational. Ask about:
+- What they saw, heard, felt, smelled, or tasted
+- The emotions they experienced
+- Specific people, places, or objects
+- The sequence of events
+- Any unusual or striking elements`;
 
 const voiceClient = new RealtimeVoiceClient({ instructions: voiceInstructions, voice: voiceSelect.value });
 
@@ -123,6 +135,7 @@ voiceStart.addEventListener('click', async () => {
     await voiceClient.start();
     console.log('Voice session started successfully');
     voiceStop.disabled = false;
+    pushToTalkBtn.disabled = false;
   } catch (error) {
     console.error('Voice session error:', error);
     voiceStatus.textContent = `Error: ${error.message || 'Unable to start voice session'}`;
@@ -134,7 +147,36 @@ voiceStop.addEventListener('click', () => {
   voiceClient.stop();
   voiceStart.disabled = false;
   voiceStop.disabled = true;
+  pushToTalkBtn.disabled = true;
   voiceSubmitDream.disabled = false; // Enable submit after stopping
+});
+
+// Push-to-talk functionality
+let isPushToTalkActive = false;
+
+pushToTalkBtn.addEventListener('mousedown', () => {
+  if (!voiceClient.connected) return;
+  isPushToTalkActive = true;
+  pushToTalkBtn.textContent = '🔴 Recording...';
+  pushToTalkBtn.style.background = '#d32f2f';
+  voiceClient.startPushToTalk();
+});
+
+pushToTalkBtn.addEventListener('mouseup', () => {
+  if (!isPushToTalkActive) return;
+  isPushToTalkActive = false;
+  pushToTalkBtn.textContent = '🎤 Hold to Speak';
+  pushToTalkBtn.style.background = '';
+  voiceClient.endPushToTalk();
+});
+
+pushToTalkBtn.addEventListener('mouseleave', () => {
+  if (isPushToTalkActive) {
+    isPushToTalkActive = false;
+    pushToTalkBtn.textContent = '🎤 Hold to Speak';
+    pushToTalkBtn.style.background = '';
+    voiceClient.endPushToTalk();
+  }
 });
 
 // Extract text transcript from conversation

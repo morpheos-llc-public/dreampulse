@@ -335,41 +335,71 @@ app.post('/api/submit-dream', async (req, res) => {
   }
 });
 
-wss.on('connection', (client) => {
+wss.on('connection', (ws, req) => {
+  console.log('Client connected to realtime proxy');
+
+  // Create connection to OpenAI Realtime API
   const openaiWs = new (require('ws'))('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'OpenAI-Beta': 'realtime=v1',
-    },
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'OpenAI-Beta': 'realtime=v1'
+    }
   });
 
-  client.on('message', (data) => {
-    if (openaiWs.readyState === openaiWs.OPEN) {
+  let isOpenAIConnected = false;
+
+  openaiWs.on('open', () => {
+    console.log('Connected to OpenAI Realtime API');
+    isOpenAIConnected = true;
+  });
+
+  openaiWs.on('message', (data) => {
+    // Forward messages from OpenAI to client
+    if (ws.readyState === ws.OPEN) {
+      ws.send(data.toString());
+    }
+  });
+
+  openaiWs.on('error', (error) => {
+    console.error('OpenAI WebSocket error:', error);
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'error',
+        error: {
+          message: 'Failed to connect to OpenAI Realtime API',
+          type: 'api_error'
+        }
+      }));
+    }
+  });
+
+  openaiWs.on('close', () => {
+    console.log('OpenAI WebSocket connection closed');
+    isOpenAIConnected = false;
+    if (ws.readyState === ws.OPEN) {
+      ws.close();
+    }
+  });
+
+  ws.on('message', (data) => {
+    // Forward messages from client to OpenAI
+    if (isOpenAIConnected && openaiWs.readyState === openaiWs.OPEN) {
       openaiWs.send(data.toString());
     }
   });
 
-  openaiWs.on('message', (data) => {
-    if (client.readyState === client.OPEN) {
-      client.send(data.toString());
-    }
-  });
-
-  const closeBoth = () => {
-    if (client.readyState === client.OPEN) {
-      client.close();
-    }
+  ws.on('close', () => {
+    console.log('Client disconnected');
     if (openaiWs.readyState === openaiWs.OPEN) {
       openaiWs.close();
     }
-  };
+  });
 
-  client.on('close', closeBoth);
-  client.on('error', closeBoth);
-  openaiWs.on('close', closeBoth);
-  openaiWs.on('error', (error) => {
-    console.error('OpenAI realtime error:', error);
-    closeBoth();
+  ws.on('error', (error) => {
+    console.error('Client WebSocket error:', error);
+    if (openaiWs.readyState === openaiWs.OPEN) {
+      openaiWs.close();
+    }
   });
 });
 
