@@ -37,6 +37,8 @@ export class RealtimeVoiceClient {
     this.silenceHoldMs = 1200;
     this.waitingForResponse = false;
     this.currentAssistantTranscript = '';
+    this.pendingUserItemIds = new Set();
+    this.recordedAudioChunks = [];
     this.callbacks = {
       status: () => {},
       transcript: () => {},
@@ -95,18 +97,24 @@ export class RealtimeVoiceClient {
   }
 
   startPushToTalk() {
-    // Enable audio sending
+    // Enable audio sending and start recording
     this.isPushToTalkActive = true;
+    this.recordedAudioChunks = [];
     this.callbacks.status('Recording...');
   }
 
-  endPushToTalk() {
+  async endPushToTalk() {
     // Commit audio and request response
     this.isPushToTalkActive = false;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this._send({ type: 'input_audio_buffer.commit' });
       if (!this.waitingForResponse) {
         this._createResponse();
+      }
+
+      // Transcribe the recorded audio via Whisper
+      if (this.recordedAudioChunks.length > 0) {
+        this._transcribeRecordedAudio();
       }
     }
     this.callbacks.status('Processing...');
@@ -147,11 +155,10 @@ export class RealtimeVoiceClient {
       this.ws = new WebSocket(wsUrl);
       this.ws.onopen = () => {
         this.connected = true;
-        this.callbacks.status('Connected to realtime session.');
+        this.callbacks.status('Waiting for session...');
         this._send({
           type: 'session.update',
           session: {
-            instructions: this.instructions,
             voice: this.voice,
             modalities: ['text', 'audio'],
             input_audio_transcription: {
@@ -160,7 +167,6 @@ export class RealtimeVoiceClient {
             turn_detection: null
           },
         });
-        this._createResponse('Introduce yourself and invite the dreamer to share.');
         resolve();
       };
 
@@ -183,11 +189,58 @@ export class RealtimeVoiceClient {
 
   _handleMessage(message) {
     console.log('Received message type:', message.type);
+
+    // Log all transcription-related events for debugging
+    if (message.type.includes('transcription') || message.type.includes('audio_buffer')) {
+      console.log('Audio/Transcription event details:', JSON.stringify(message, null, 2));
+    }
+
     switch (message.type) {
       case 'session.created':
+        console.log('Session created:', message);
+        // Send system instructions as conversation item
+        this._send({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: 'system',
+            content: [{ type: 'input_text', text: this.instructions }]
+          }
+        });
+        break;
       case 'session.updated':
-        console.log('Session established:', message);
-        this.callbacks.status('Connected and ready');
+        console.log('Session updated:', message);
+        break;
+      case 'conversation.item.created':
+        console.log('Conversation item created:', message.item?.role);
+        if (message.item?.role === 'system') {
+          // System message added successfully, now create initial greeting
+          this.callbacks.status('Connected and ready');
+          this._createResponse('');
+        } else if (message.item?.role === 'user') {
+          // User message created - transcript won't be available yet with push-to-talk
+          // We'll extract it from the assistant's response context later
+          console.log('User item created, ID:', message.item?.id);
+          if (message.item?.id) {
+            this.pendingUserItemIds.add(message.item.id);
+          }
+        }
+        break;
+      case 'response.output_item.added':
+        // When assistant responds, we can infer what the user said from context
+        console.log('Response output item added');
+        break;
+      case 'response.text.delta':
+      case 'response.text.done':
+        // These events might contain text versions of what was said
+        console.log('Response text event:', message.type, message);
+        break;
+      case 'conversation.item.input_audio_transcription.completed':
+        console.log('Input audio transcription completed:', message);
+        if (message.transcript) {
+          console.log('User said (from transcription event):', message.transcript);
+          this.callbacks.transcript({ speaker: 'user', text: message.transcript });
+        }
         break;
       case 'response.audio.delta':
         if (message.delta) {
@@ -210,7 +263,9 @@ export class RealtimeVoiceClient {
           this.currentAssistantTranscript = '';
         }
         break;
+      case 'conversation.item.input_audio_transcription.completed':
       case 'input_audio_transcription.completed':
+        console.log('Transcription event:', message.type, message);
         if (message.transcript) {
           console.log('User said:', message.transcript);
           this.callbacks.transcript({ speaker: 'user', text: message.transcript });
@@ -250,6 +305,10 @@ export class RealtimeVoiceClient {
       const v = Math.max(-1, Math.min(1, input[i]));
       pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
     }
+
+    // Store audio for transcription
+    this.recordedAudioChunks.push(new Int16Array(pcm));
+
     this._send({ type: 'input_audio_buffer.append', audio: toBase64Bytes(pcm) });
   }
 
@@ -291,5 +350,95 @@ export class RealtimeVoiceClient {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
     }
+  }
+
+  _extractTranscriptFromItem(item) {
+    // Extract transcript from conversation item
+    // Item structure: { content: [{ type: 'input_audio', transcript: '...' }] }
+    if (!item || !item.content || !Array.isArray(item.content)) {
+      return '';
+    }
+
+    for (const content of item.content) {
+      if (content.type === 'input_audio' && content.transcript) {
+        return content.transcript;
+      }
+    }
+
+    return '';
+  }
+
+  async _transcribeRecordedAudio() {
+    try {
+      // Combine all audio chunks into a single array
+      const totalLength = this.recordedAudioChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const combinedAudio = new Int16Array(totalLength);
+      let offset = 0;
+      for (const chunk of this.recordedAudioChunks) {
+        combinedAudio.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      // Convert to base64 WAV
+      const wavBlob = this._int16ToWav(combinedAudio, this.sampleRate);
+      const reader = new FileReader();
+
+      reader.onloadend = async () => {
+        const base64Audio = reader.result.split(',')[1];
+
+        const response = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioBase64: base64Audio }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.text) {
+            console.log('User said (from Whisper):', data.text);
+            this.callbacks.transcript({ speaker: 'user', text: data.text });
+          }
+        } else {
+          console.error('Transcription failed:', await response.text());
+        }
+      };
+
+      reader.readAsDataURL(wavBlob);
+    } catch (error) {
+      console.error('Transcription error:', error);
+    }
+  }
+
+  _int16ToWav(samples, sampleRate) {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    // WAV header
+    const writeString = (offset, string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // fmt chunk size
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true); // byte rate
+    view.setUint16(32, 2, true); // block align
+    view.setUint16(34, 16, true); // bits per sample
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    // Write audio data
+    for (let i = 0; i < samples.length; i++) {
+      view.setInt16(44 + i * 2, samples[i], true);
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
   }
 }

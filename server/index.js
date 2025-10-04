@@ -1,8 +1,12 @@
 const path = require('path');
 const http = require('http');
 const express = require('express');
+const multer = require('multer');
 const { WebSocketServer } = require('ws');
+const fs = require('fs');
 require('dotenv').config();
+
+const upload = multer({ dest: '/tmp/' });
 
 const fetch = global.fetch ?? ((...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)));
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -32,11 +36,61 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/realtime' });
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..', 'web')));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+app.post('/api/transcribe', async (req, res) => {
+  try {
+    const { audioBase64 } = req.body;
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'No audio data provided' });
+    }
+
+    // Write base64 audio to temp file
+    const tempPath = path.join('/tmp', `audio-${Date.now()}.wav`);
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    fs.writeFileSync(tempPath, audioBuffer);
+
+    const FormDataNode = require('form-data');
+    const formData = new FormDataNode();
+    formData.append('file', fs.createReadStream(tempPath), {
+      filename: 'audio.wav',
+      contentType: 'audio/wav',
+    });
+    formData.append('model', 'whisper-1');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        ...formData.getHeaders(),
+      },
+      body: formData,
+    });
+
+    // Clean up temp file
+    try {
+      fs.unlinkSync(tempPath);
+    } catch (e) {
+      console.warn('Could not delete temp file:', e.message);
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Whisper transcription error:', error);
+      return res.status(500).json({ error: 'Transcription failed' });
+    }
+
+    const data = await response.json();
+    res.json({ text: data.text });
+  } catch (error) {
+    console.error('Transcribe endpoint error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.post('/api/chat', async (req, res) => {
