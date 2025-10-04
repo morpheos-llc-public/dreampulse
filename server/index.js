@@ -202,6 +202,42 @@ async function generateFreepikVideo(prompt, options = {}) {
   };
 }
 
+// Generate dream interpretation using OpenAI
+async function generateDreamInterpretation(dreamTranscript) {
+  const systemPrompt = `You are a compassionate dream interpreter who blends Jungian psychology, symbolism, and modern dream analysis. Provide insightful, meaningful interpretations that:
+- Identify key symbols and their potential meanings
+- Explore emotional themes and psychological significance
+- Connect dream elements to the dreamer's inner world
+- Offer thoughtful perspectives without being prescriptive
+- Use warm, accessible language
+
+Keep interpretations 2-3 paragraphs, focusing on depth over length.`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Provide a thoughtful interpretation of this dream:\n\n${dreamTranscript}` },
+      ],
+      temperature: 0.8,
+      max_tokens: 400,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('OpenAI interpretation generation failed');
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
 // Generate cinematic video prompt from dream using OpenAI
 async function generateVideoPromptFromDream(dreamTranscript) {
   const systemPrompt = `You are a cinematic video prompt generator. Convert dream descriptions into concise, visually stunning prompts optimized for AI video generation. Focus on:
@@ -255,13 +291,23 @@ app.post('/api/submit-dream', async (req, res) => {
       return res.status(500).json({ error: 'Freepik API key is not configured' });
     }
 
-    let analysis = { dream: transcript };
+    let interpretation = '';
     let videoPrompt = transcript;
     let promptSource = 'openai_gpt4o_mini';
 
-    // Step 1: Generate cinematic video prompt using OpenAI
+    // Step 1: Generate dream interpretation using OpenAI
     try {
-      console.log('Step 1: Generating cinematic video prompt with OpenAI...');
+      console.log('Step 1: Generating dream interpretation with OpenAI...');
+      interpretation = await generateDreamInterpretation(transcript);
+      console.log('Generated interpretation:', interpretation.substring(0, 100) + '...');
+    } catch (error) {
+      console.warn('OpenAI interpretation generation failed:', error.message);
+      interpretation = 'Unable to generate interpretation at this time.';
+    }
+
+    // Step 2: Generate cinematic video prompt using OpenAI
+    try {
+      console.log('Step 2: Generating cinematic video prompt with OpenAI...');
       videoPrompt = await generateVideoPromptFromDream(transcript);
       console.log('Generated prompt:', videoPrompt);
     } catch (error) {
@@ -270,15 +316,15 @@ app.post('/api/submit-dream', async (req, res) => {
       promptSource = 'raw_transcript';
     }
 
-    // Step 2: Generate video with Freepik
-    console.log('Step 2: Generating video with Freepik...');
+    // Step 3: Generate video with Freepik
+    console.log('Step 3: Generating video with Freepik...');
     const videoResult = await generateFreepikVideo(videoPrompt, { duration, model });
 
     console.log('Video generation complete:', videoResult);
 
     // Return complete result
     res.json({
-      analysis,
+      interpretation,
       prompt: videoPrompt,
       promptSource,
       video: videoResult,

@@ -25,6 +25,7 @@ const videoReset = document.getElementById('video-reset');
 const errorMessage = document.getElementById('error-message');
 const errorRetry = document.getElementById('error-retry');
 const analysisDetails = document.getElementById('analysis-details');
+const interpretationText = document.getElementById('interpretation-text');
 const stepAnalysis = document.getElementById('step-analysis');
 const stepPrompt = document.getElementById('step-prompt');
 const stepVideo = document.getElementById('step-video');
@@ -118,11 +119,13 @@ voiceStart.addEventListener('click', async () => {
   voiceStatus.textContent = 'Initializing microphone...';
   voiceStart.disabled = true;
   try {
+    console.log('Requesting microphone access...');
     await voiceClient.start();
+    console.log('Voice session started successfully');
     voiceStop.disabled = false;
   } catch (error) {
-    console.error(error);
-    voiceStatus.textContent = 'Unable to start voice session. Check console for details.';
+    console.error('Voice session error:', error);
+    voiceStatus.textContent = `Error: ${error.message || 'Unable to start voice session'}`;
     voiceStart.disabled = false;
   }
 });
@@ -203,7 +206,8 @@ async function submitDream(transcript, source = 'text') {
     stepVideo.style.opacity = '1';
     stepVideo.textContent = 'Video generated ✓';
 
-    // Display video
+    // Display interpretation and video
+    interpretationText.textContent = result.interpretation || 'No interpretation available.';
     videoSource.src = result.video.videoUrl;
     videoPlayer.load();
     videoDownload.href = result.video.videoUrl;
