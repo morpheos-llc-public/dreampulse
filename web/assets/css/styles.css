@@ -1,0 +1,251 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+  --accent: #38bdf8;
+  --accent-light: rgba(56, 189, 248, 0.15);
+  --panel-bg: rgba(15, 23, 42, 0.8);
+  --panel-border: rgba(148, 163, 184, 0.2);
+  --text-muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08), transparent 40%),
+              radial-gradient(circle at 80% 0%, rgba(244, 114, 182, 0.08), transparent 40%),
+              #020617;
+}
+
+.app-header {
+  text-align: center;
+  padding: 2.5rem 1rem 1rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  letter-spacing: 0.04em;
+}
+
+.app-header p {
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.app-main {
+  flex: 1;
+  display: grid;
+  gap: 1.5rem;
+  width: min(1200px, 95vw);
+  margin: 0 auto;
+  padding: 0 0 3rem;
+}
+
+@media (min-width: 960px) {
+  .app-main {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 1.2rem;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(16px);
+  min-height: 520px;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.panel-subtitle {
+  margin: 0.35rem 0 1.2rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-right: 0.5rem;
+}
+
+.message {
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  max-width: 85%;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.message.user {
+  margin-left: auto;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.message.assistant {
+  margin-right: auto;
+  background: rgba(15, 118, 110, 0.15);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+}
+
+.chat-form {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-form textarea {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.6);
+  color: inherit;
+  resize: vertical;
+  min-height: 120px;
+}
+
+.chat-form textarea:focus {
+  outline: 2px solid var(--accent);
+  border-color: transparent;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primary {
+  padding: 0.65rem 1.4rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.danger {
+  padding: 0.65rem 1.4rem;
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.9);
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.ghost {
+  padding: 0.65rem 1.4rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.chat-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.status-line {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.voice-controls,
+.voice-buttons {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.voice-controls label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.voice-controls select {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.6);
+  color: inherit;
+}
+
+.voice-buttons {
+  margin-top: 0.75rem;
+}
+
+.voice-transcript {
+  flex: 1;
+  margin-top: 1.2rem;
+  border-radius: 0.9rem;
+  padding: 1rem;
+  background: rgba(31, 41, 55, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.voice-transcript p {
+  margin: 0.4rem 0;
+}
+
+.voice-transcript .speaker {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 1rem 0 2rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

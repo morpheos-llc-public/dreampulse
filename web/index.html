@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DreamPulse Studio</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>DreamPulse Studio</h1>
+    <p>Capture your dreams using text chat or realtime voice and prepare them for cinematic remixes.</p>
+  </header>
+
+  <main class="app-main">
+    <section class="panel" aria-labelledby="chat-title">
+      <div class="panel-header">
+        <h2 id="chat-title">Text Companion</h2>
+        <p class="panel-subtitle">A friendly GPT chat to help you describe tonight's dream.</p>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-input" name="message" rows="3" placeholder="Tell DreamPulse what happened..." required></textarea>
+        <div class="chat-actions">
+          <button type="submit" class="primary">Send</button>
+          <button type="button" id="chat-reset" class="ghost">Reset</button>
+          <button type="button" id="chat-submit-dream" class="primary">Submit Dream</button>
+        </div>
+      </form>
+      <div id="chat-status" class="status-line" role="status"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="voice-title">
+      <div class="panel-header">
+        <h2 id="voice-title">Voice Companion</h2>
+        <p class="panel-subtitle">Speak with an OpenAI realtime guide while DreamPulse listens.</p>
+      </div>
+      <div class="voice-controls">
+        <label for="voice-select">Voice</label>
+        <select id="voice-select">
+          <option value="alloy">Alloy</option>
+          <option value="ash">Ash</option>
+          <option value="ballad">Ballad</option>
+          <option value="coral">Coral</option>
+          <option value="echo">Echo</option>
+          <option value="sage">Sage</option>
+          <option value="shimmer">Shimmer</option>
+          <option value="verse">Verse</option>
+        </select>
+      </div>
+      <div class="voice-buttons">
+        <button id="voice-start" class="primary">Start Voice Session</button>
+        <button id="voice-stop" class="danger" disabled>Stop</button>
+        <button id="voice-submit-dream" class="primary" disabled>Submit Dream</button>
+      </div>
+      <div id="voice-status" class="status-line" role="status">Microphone idle.</div>
+      <div id="voice-transcript" class="voice-transcript" aria-live="polite"></div>
+    </section>
+
+    <section class="panel" id="results-panel" aria-labelledby="results-title" style="display: none;">
+      <div class="panel-header">
+        <h2 id="results-title">Your Dream Video</h2>
+        <p class="panel-subtitle">Generated visualization of your dream.</p>
+      </div>
+      <div id="results-content">
+        <div id="results-loading" style="display: none;">
+          <p>Processing your dream...</p>
+          <div class="progress-steps">
+            <div id="step-analysis" class="step">Analyzing dream...</div>
+            <div id="step-prompt" class="step">Generating video prompt...</div>
+            <div id="step-video" class="step">Creating video (this may take a few minutes)...</div>
+          </div>
+        </div>
+        <div id="results-video" style="display: none;">
+          <video id="video-player" controls style="max-width: 100%; border-radius: 8px;">
+            <source id="video-source" type="video/mp4">
+            Your browser does not support video playback.
+          </video>
+          <div class="video-actions" style="margin-top: 1rem;">
+            <a id="video-download" class="primary" download="dreampulse-video.mp4">Download Video</a>
+            <button id="video-reset" class="ghost">Create Another Dream</button>
+          </div>
+          <details style="margin-top: 1rem;">
+            <summary>Analysis Details</summary>
+            <pre id="analysis-details" style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto;"></pre>
+          </details>
+        </div>
+        <div id="results-error" style="display: none; color: #d32f2f;">
+          <p id="error-message"></p>
+          <button id="error-retry" class="primary">Try Again</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>DreamPulse Studio - Transform your dreams into cinematic experiences.</p>
+  </footer>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

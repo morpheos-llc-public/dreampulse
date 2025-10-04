@@ -1,0 +1,333 @@
+const path = require('path');
+const http = require('http');
+const express = require('express');
+const { WebSocketServer } = require('ws');
+require('dotenv').config();
+
+const fetch = global.fetch ?? ((...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)));
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const AIRIA_API_KEY = process.env.AIRIA_API_KEY;
+const AIRIA_PIPELINE_URL = process.env.AIRIA_PIPELINE_URL;
+const AIRIA_PROMPT_PIPELINE_URL = process.env.AIRIA_PROMPT_PIPELINE_URL;
+const AIRIA_USER_ID = process.env.AIRIA_USER_ID;
+const FREEPIK_API_KEY = process.env.FREEPIK_API_KEY;
+
+if (!OPENAI_API_KEY) {
+  console.warn('OPENAI_API_KEY is not set. The frontend will fail when calling OpenAI.');
+}
+if (!AIRIA_API_KEY) {
+  console.warn('AIRIA_API_KEY is not set. Prompt generation will fail.');
+}
+if (!AIRIA_PIPELINE_URL) {
+  console.warn('AIRIA_PIPELINE_URL is not set. Dream analysis will fail.');
+}
+if (!AIRIA_PROMPT_PIPELINE_URL) {
+  console.warn('AIRIA_PROMPT_PIPELINE_URL is not set. Prompt generation endpoint is disabled.');
+}
+if (!FREEPIK_API_KEY) {
+  console.warn('FREEPIK_API_KEY is not set. Video generation will fail.');
+}
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/realtime' });
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'web')));
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { messages } = req.body;
+    if (!Array.isArray(messages)) {
+      return res.status(400).json({ error: 'messages array required' });
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages,
+        temperature: 0.6,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('OpenAI chat error:', error);
+      return res.status(500).json({ error: 'OpenAI chat error' });
+    }
+
+    const data = await response.json();
+    const message = data.choices?.[0]?.message?.content ?? '';
+    res.json({ message });
+  } catch (error) {
+    console.error('Chat endpoint error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/prompt', async (req, res) => {
+  if (!AIRIA_PROMPT_PIPELINE_URL || !AIRIA_API_KEY) {
+    return res.status(500).json({ error: 'Prompt pipeline is not configured' });
+  }
+
+  try {
+    const { analysis, userInput, asyncOutput = false, userId } = req.body || {};
+    const payloadSource = userInput ?? analysis;
+    if (!payloadSource) {
+      return res.status(400).json({ error: 'Provide `analysis` or `userInput` in the request body' });
+    }
+
+    const serializedInput = typeof payloadSource === 'string' ? payloadSource : JSON.stringify(payloadSource);
+    const pipelinePayload = {
+      userInput: serializedInput,
+      asyncOutput,
+    };
+
+    const resolvedUserId = userId || AIRIA_USER_ID;
+    if (resolvedUserId) {
+      pipelinePayload.userId = resolvedUserId;
+    }
+
+    const response = await fetch(AIRIA_PROMPT_PIPELINE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': AIRIA_API_KEY,
+      },
+      body: JSON.stringify(pipelinePayload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Airia prompt error:', errorText);
+      return res.status(500).json({ error: 'Airia prompt pipeline error' });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Prompt endpoint error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Freepik video generation helper
+async function generateFreepikVideo(prompt, options = {}) {
+  const {
+    model = 'minimax-hailuo-02-768p',
+    duration = 6,
+    promptOptimizer = true,
+    timeoutSeconds = 600,
+    pollInterval = 3,
+  } = options;
+
+  const FREEPIK_BASE_URL = 'https://api.freepik.com/v1/ai';
+  const endpoint = `${FREEPIK_BASE_URL}/image-to-video/${model}`;
+  const headers = {
+    'x-freepik-api-key': FREEPIK_API_KEY,
+    'Content-Type': 'application/json',
+  };
+
+  // Submit video generation task
+  const submitResponse = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      prompt,
+      duration: String(duration),
+      prompt_optimizer: promptOptimizer,
+    }),
+  });
+
+  if (!submitResponse.ok) {
+    const errorText = await submitResponse.text();
+    throw new Error(`Freepik submission failed: ${errorText}`);
+  }
+
+  const submitData = await submitResponse.json();
+  const taskId = submitData.data.task_id;
+  const statusEndpoint = `${endpoint}/${taskId}`;
+
+  // Poll for completion
+  const startTime = Date.now();
+  let status = submitData.data.status || 'PENDING';
+
+  while (status !== 'COMPLETED' && status !== 'FAILED') {
+    if (Date.now() - startTime > timeoutSeconds * 1000) {
+      throw new Error('Freepik video generation timed out');
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollInterval * 1000));
+
+    const statusResponse = await fetch(statusEndpoint, {
+      headers: { 'x-freepik-api-key': FREEPIK_API_KEY },
+    });
+
+    if (!statusResponse.ok) {
+      throw new Error('Freepik status check failed');
+    }
+
+    const statusData = await statusResponse.json();
+    status = statusData.data.status;
+    console.log(`Freepik task ${taskId}: ${status}`);
+  }
+
+  if (status !== 'COMPLETED') {
+    throw new Error(`Freepik task failed with status: ${status}`);
+  }
+
+  const finalResponse = await fetch(statusEndpoint, {
+    headers: { 'x-freepik-api-key': FREEPIK_API_KEY },
+  });
+  const finalData = await finalResponse.json();
+  const videoUrl = finalData.data.generated?.[0];
+
+  if (!videoUrl) {
+    throw new Error('No video URL in Freepik response');
+  }
+
+  return {
+    taskId,
+    status,
+    videoUrl,
+  };
+}
+
+// Generate cinematic video prompt from dream using OpenAI
+async function generateVideoPromptFromDream(dreamTranscript) {
+  const systemPrompt = `You are a cinematic video prompt generator. Convert dream descriptions into concise, visually stunning prompts optimized for AI video generation. Focus on:
+- Vivid visual imagery and atmosphere
+- Camera angles and movements
+- Lighting and color palette
+- Key symbolic elements
+- Cinematic mood and pacing
+
+Keep prompts under 200 words and emphasize visual storytelling over narrative details.`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Convert this dream into a cinematic video generation prompt:\n\n${dreamTranscript}` },
+      ],
+      temperature: 0.7,
+      max_tokens: 300,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('OpenAI prompt generation failed');
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || dreamTranscript;
+}
+
+// Submit dream endpoint - full pipeline orchestration
+app.post('/api/submit-dream', async (req, res) => {
+  try {
+    console.log('Received submit-dream request:', { body: req.body });
+    const { transcript, duration = 5, model = 'seedance-lite-480p', skipAiria = true } = req.body;
+
+    if (!transcript || typeof transcript !== 'string' || !transcript.trim()) {
+      console.error('Invalid transcript:', transcript);
+      return res.status(400).json({ error: 'transcript is required' });
+    }
+
+    console.log('Transcript:', transcript.substring(0, 100) + '...');
+
+    if (!FREEPIK_API_KEY) {
+      return res.status(500).json({ error: 'Freepik API key is not configured' });
+    }
+
+    let analysis = { dream: transcript };
+    let videoPrompt = transcript;
+    let promptSource = 'openai_gpt4o_mini';
+
+    // Step 1: Generate cinematic video prompt using OpenAI
+    try {
+      console.log('Step 1: Generating cinematic video prompt with OpenAI...');
+      videoPrompt = await generateVideoPromptFromDream(transcript);
+      console.log('Generated prompt:', videoPrompt);
+    } catch (error) {
+      console.warn('OpenAI prompt generation failed, using raw transcript:', error.message);
+      videoPrompt = transcript;
+      promptSource = 'raw_transcript';
+    }
+
+    // Step 2: Generate video with Freepik
+    console.log('Step 2: Generating video with Freepik...');
+    const videoResult = await generateFreepikVideo(videoPrompt, { duration, model });
+
+    console.log('Video generation complete:', videoResult);
+
+    // Return complete result
+    res.json({
+      analysis,
+      prompt: videoPrompt,
+      promptSource,
+      video: videoResult,
+    });
+  } catch (error) {
+    console.error('Submit dream error:', error);
+    res.status(500).json({ error: error.message || 'Pipeline execution failed' });
+  }
+});
+
+wss.on('connection', (client) => {
+  const openaiWs = new (require('ws'))('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'OpenAI-Beta': 'realtime=v1',
+    },
+  });
+
+  client.on('message', (data) => {
+    if (openaiWs.readyState === openaiWs.OPEN) {
+      openaiWs.send(data.toString());
+    }
+  });
+
+  openaiWs.on('message', (data) => {
+    if (client.readyState === client.OPEN) {
+      client.send(data.toString());
+    }
+  });
+
+  const closeBoth = () => {
+    if (client.readyState === client.OPEN) {
+      client.close();
+    }
+    if (openaiWs.readyState === openaiWs.OPEN) {
+      openaiWs.close();
+    }
+  };
+
+  client.on('close', closeBoth);
+  client.on('error', closeBoth);
+  openaiWs.on('close', closeBoth);
+  openaiWs.on('error', (error) => {
+    console.error('OpenAI realtime error:', error);
+    closeBoth();
+  });
+});
+
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, () => {
+  console.log(`DreamPulse UI server listening on http://localhost:${PORT}`);
+});
