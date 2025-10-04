@@ -10,23 +10,10 @@ const upload = multer({ dest: '/tmp/' });
 
 const fetch = global.fetch ?? ((...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)));
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const AIRIA_API_KEY = process.env.AIRIA_API_KEY;
-const AIRIA_PIPELINE_URL = process.env.AIRIA_PIPELINE_URL;
-const AIRIA_PROMPT_PIPELINE_URL = process.env.AIRIA_PROMPT_PIPELINE_URL;
-const AIRIA_USER_ID = process.env.AIRIA_USER_ID;
 const FREEPIK_API_KEY = process.env.FREEPIK_API_KEY;
 
 if (!OPENAI_API_KEY) {
   console.warn('OPENAI_API_KEY is not set. The frontend will fail when calling OpenAI.');
-}
-if (!AIRIA_API_KEY) {
-  console.warn('AIRIA_API_KEY is not set. Prompt generation will fail.');
-}
-if (!AIRIA_PIPELINE_URL) {
-  console.warn('AIRIA_PIPELINE_URL is not set. Dream analysis will fail.');
-}
-if (!AIRIA_PROMPT_PIPELINE_URL) {
-  console.warn('AIRIA_PROMPT_PIPELINE_URL is not set. Prompt generation endpoint is disabled.');
 }
 if (!FREEPIK_API_KEY) {
   console.warn('FREEPIK_API_KEY is not set. Video generation will fail.');
@@ -124,52 +111,6 @@ app.post('/api/chat', async (req, res) => {
     res.json({ message });
   } catch (error) {
     console.error('Chat endpoint error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/prompt', async (req, res) => {
-  if (!AIRIA_PROMPT_PIPELINE_URL || !AIRIA_API_KEY) {
-    return res.status(500).json({ error: 'Prompt pipeline is not configured' });
-  }
-
-  try {
-    const { analysis, userInput, asyncOutput = false, userId } = req.body || {};
-    const payloadSource = userInput ?? analysis;
-    if (!payloadSource) {
-      return res.status(400).json({ error: 'Provide `analysis` or `userInput` in the request body' });
-    }
-
-    const serializedInput = typeof payloadSource === 'string' ? payloadSource : JSON.stringify(payloadSource);
-    const pipelinePayload = {
-      userInput: serializedInput,
-      asyncOutput,
-    };
-
-    const resolvedUserId = userId || AIRIA_USER_ID;
-    if (resolvedUserId) {
-      pipelinePayload.userId = resolvedUserId;
-    }
-
-    const response = await fetch(AIRIA_PROMPT_PIPELINE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-KEY': AIRIA_API_KEY,
-      },
-      body: JSON.stringify(pipelinePayload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Airia prompt error:', errorText);
-      return res.status(500).json({ error: 'Airia prompt pipeline error' });
-    }
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    console.error('Prompt endpoint error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
